@@ -1,0 +1,15 @@
+[server]
+# Optimizes WebSocket payload size, speeding up large table/chart transfers
+enableWebsocketCompression = true
+headless = true
+
+[browser]
+# Disables background telemetry calls to Streamlit servers, speeding up initial page load
+gatherUsageStats = false
+
+[runner]
+# Enables fast re-execution by skipping redundant runs when state hasn't changed
+fastReruns = true
+
+[global]
+showWarningOnDirectExecution = false
