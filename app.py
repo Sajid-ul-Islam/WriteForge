@@ -22,15 +22,32 @@ st.caption("Convert raw thoughts in any language into publish-ready English arti
 # --- Sidebar: Provider Config ---
 with st.sidebar:
     st.header("AI Provider")
-    provider_name = st.selectbox("Provider", ["OpenAI", "Gemini", "Ollama"])
+    provider_name = st.selectbox("Provider", ["OpenAI", "Gemini", "Groq", "HuggingFace", "OpenRouter", "Ollama"])
 
     if provider_name == "OpenAI":
-        api_key = st.text_input("OpenAI API Key", value=os.getenv("OPENAI_API_KEY", ""), type="password")
+        default_key = st.secrets.get("llm", {}).get("openai_key", os.getenv("OPENAI_API_KEY", ""))
+        api_key = st.text_input("OpenAI API Key", value=default_key, type="password")
         model = st.selectbox("Model", ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1-nano"])
         provider_kwargs = {"api_key": api_key, "model": model}
     elif provider_name == "Gemini":
-        api_key = st.text_input("Gemini API Key", value=os.getenv("GEMINI_API_KEY", ""), type="password")
+        default_key = st.secrets.get("llm", {}).get("gemini_key", os.getenv("GEMINI_API_KEY", ""))
+        api_key = st.text_input("Gemini API Key", value=default_key, type="password")
         model = st.selectbox("Model", ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-2.5-pro"])
+        provider_kwargs = {"api_key": api_key, "model": model}
+    elif provider_name == "Groq":
+        default_key = st.secrets.get("llm", {}).get("groq_key", os.getenv("GROQ_API_KEY", ""))
+        api_key = st.text_input("Groq API Key", value=default_key, type="password")
+        model = st.selectbox("Model", ["llama3-70b-8192", "mixtral-8x7b-32768"])
+        provider_kwargs = {"api_key": api_key, "model": model}
+    elif provider_name == "HuggingFace":
+        default_key = st.secrets.get("llm", {}).get("huggingface_key", os.getenv("HF_API_KEY", ""))
+        api_key = st.text_input("HF API Key", value=default_key, type="password")
+        model = st.text_input("Model ID", value="mistralai/Mistral-7B-Instruct-v0.2")
+        provider_kwargs = {"api_key": api_key, "model": model}
+    elif provider_name == "OpenRouter":
+        default_key = st.secrets.get("llm", {}).get("openrouter_key", os.getenv("OPENROUTER_API_KEY", ""))
+        api_key = st.text_input("OpenRouter API Key", value=default_key, type="password")
+        model = st.text_input("Model ID", value="google/gemini-2.0-flash-001")
         provider_kwargs = {"api_key": api_key, "model": model}
     else:
         base_url = st.text_input("Ollama URL", value=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"))
