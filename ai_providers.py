@@ -87,6 +87,9 @@ def get_provider(provider_name: str, **kwargs) -> AIProvider:
     providers = {
         "OpenAI": OpenAIProvider,
         "Gemini": GeminiProvider,
+        "Groq": GroqProvider,
+        "HuggingFace": HuggingFaceProvider,
+        "OpenRouter": OpenRouterProvider,
         "Ollama": OllamaProvider,
     }
     if provider_name not in providers:
