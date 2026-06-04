@@ -1,7 +1,18 @@
-# Secrets & credentials
+# Secrets & credentials — NEVER commit these
 .streamlit/secrets.toml
-*.env
-.env.*
+.streamlit/secrets.toml.bak
+.streamlit/secrets.toml.backup
+*.toml.bak
+*.toml.backup
+.env
+.env.local
+.env.production
+.env.staging
+
+# Explicitly allow example/template files (safe to commit)
+!*.example
+!*.example.*
+!.env.example
 
 # Python
 __pycache__/
