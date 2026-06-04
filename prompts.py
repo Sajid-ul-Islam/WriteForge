@@ -9,14 +9,14 @@ LENGTHS = {
 }
 
 
-def build_article_prompt(text: str, tone: str, length: str) -> str:
+def build_article_prompt(text: str, tone: str, length: str, context: str = "") -> str:
     length_desc = LENGTHS.get(length, LENGTHS["Medium"])
+    context_section = f"\n\nReference Context:\n{context}\n" if context else ""
     return f"""You are an elite editorial writer.
 
 Task:
 1. Detect the language of the input text
-2. If not English, translate it to English
-3. Convert it into a high-quality article
+2. Convert it into a high-quality article, utilizing the provided Reference Context if available.
 
 Requirements:
 - Strong, attention-grabbing headline
@@ -28,6 +28,8 @@ Requirements:
 
 Format your output as:
 # [Headline]
+
+{context_section}
 
 [Article body with ## subtitles]
 
@@ -43,6 +45,19 @@ Format:
 1. [headline]
 2. [headline]
 3. [headline]
+
+Text:
+{text}"""
+
+
+def build_poem_prompt(text: str, tone: str) -> str:
+    return f"""Convert the following text into a high-quality poem.
+
+Requirements:
+- Capture the core message and emotions of the input
+- {tone} tone and style
+- Use evocative imagery and rhythmic structure
+- Target language: English (translate if the input is not in English)
 
 Text:
 {text}"""

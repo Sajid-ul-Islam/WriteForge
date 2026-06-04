@@ -3,7 +3,6 @@ import datetime
 import sys
 import importlib.metadata
 import json
-import threading # Import threading
 import io
 import zipfile
 import time
@@ -60,20 +59,6 @@ def load_vector_db():
         except Exception as e:
             logger.error(f"Failed to load vector DB: {e}")
     return None
-
-def _run_semantic_search_thread(query, vector_db):
-    """Helper function to run similarity search in a background thread."""
-    try:
-        docs = vector_db.similarity_search(query, k=3)
-        context = "\n\n".join([d.page_content for d in docs])
-        st.session_state.semantic_search_result = context
-        st.session_state.semantic_search_error = ""
-    except Exception as e:
-        st.session_state.semantic_search_error = str(e)
-        st.session_state.semantic_search_result = ""
-    finally:
-        st.session_state.semantic_search_thread = None # Mark thread as finished
-
 
 def vectorize_text(text):
     """Chunks text and appends to or creates a local FAISS vector store."""
@@ -148,18 +133,6 @@ if "vector_db" not in st.session_state:
 if "last_uploaded_file" not in st.session_state:
     st.session_state.last_uploaded_file = None
 
-# Session state for background semantic search
-if "semantic_search_thread" not in st.session_state:
-    st.session_state.semantic_search_thread = None
-if "semantic_search_result" not in st.session_state:
-    st.session_state.semantic_search_result = ""
-if "semantic_search_error" not in st.session_state:
-    st.session_state.semantic_search_error = ""
-if "semantic_search_query_input" not in st.session_state:
-    st.session_state.semantic_search_query_input = ""
-if "main_text_area_value" not in st.session_state:
-    st.session_state.main_text_area_value = ""
-
 # --- Custom CSS ---
 st.markdown("""
 <style>
@@ -172,18 +145,18 @@ st.title("WriteForge AI")
 st.caption("Convert raw thoughts in any language into publish-ready English articles")
 
 # --- Sidebar: Settings ---
-def render_sidebar_warnings(missing):
-    if missing:
+with st.sidebar:
+    if missing_deps:
         with st.expander("⚠️ System Warnings", expanded=False):
             st.warning("Some features are disabled due to missing packages:")
-            st.write(f"`{', '.join(missing)}`")
+            st.write(f"`{', '.join(missing_deps)}`")
             st.info("To enable all features, run:")
             st.code("pip install -r requirements.txt")
 
-def render_sidebar_settings():
     st.header("Settings")
-    temp = st.slider("Creativity", 0.0, 1.5, 0.7, 0.1)
-    rag = st.checkbox("Enable RAG (Context Enhancement)", value=True, help="Automatically use uploaded documents to enhance article generation.")
+    temperature = st.slider("Creativity", 0.0, 1.5, 0.7, 0.1)
+    rag_enabled = st.checkbox("Enable RAG (Context Enhancement)", value=True, help="Automatically use uploaded documents to enhance article generation.")
+
     if st.button("🗑️ Clear Knowledge Base", use_container_width=True):
         import shutil
         if os.path.exists(VECTOR_DB_DIR):
@@ -192,38 +165,11 @@ def render_sidebar_settings():
         st.session_state.last_uploaded_file = None
         st.toast("Knowledge base cleared!", icon="🗑️")
         st.rerun()
-    return temp, rag
 
-def render_sidebar_provider():
-    st.divider()
-    st.header("AI Provider")
-    mode = st.radio("Selection Mode", ["Auto Fallback", "Manual Selection"], index=0)
-    selected = None
-    custom_cfg = None
-    
-    if mode == "Manual Selection":
-        selected = st.selectbox("Preferred Provider", ["Anthropic", "Gemini", "OpenAI", "Groq", "OpenRouter", "Ollama", "Custom"])
-        if selected == "Custom":
-            presets = {
-                "Manual": {"url": "", "model": ""},
-                "LM Studio": {"url": "http://localhost:1234/v1", "model": "model-identifier"},
-                "Ollama (OpenAI API)": {"url": "http://localhost:11434/v1", "model": "llama3"},
-                "LocalAI": {"url": "http://localhost:8080/v1", "model": "gpt-3.5-turbo"}
-            }
-            choice = st.selectbox("Custom Presets", list(presets.keys()))
-            col_c1, col_c2 = st.columns(2)
-            c_url = col_c1.text_input("Base URL", value=presets[choice]["url"], placeholder="http://localhost:1234/v1")
-            c_model = col_c2.text_input("Model ID", value=presets[choice]["model"], placeholder="local-model")
-            c_key = st.text_input("API Key (if any)", type="password")
-            if c_url and c_model:
-                custom_cfg = {"api_key": c_key, "base_url": c_url, "model": c_model}
-    return mode, selected, custom_cfg
-
-def render_sidebar_diagnostics(mode, selected, custom_cfg):
     st.divider()
     st.header("Diagnostics")
     if st.button("🔍 Run Health Check", use_container_width=True):
-        candidates = get_provider_candidates(mode, selected, custom_cfg)
+        candidates = get_provider_candidates()
         for p_name, p_kwargs in candidates:
             try:
                 provider = get_provider(p_name, **p_kwargs)
@@ -232,10 +178,10 @@ def render_sidebar_diagnostics(mode, selected, custom_cfg):
             except Exception as e:
                 st.sidebar.error(f"❌ {p_name}: {str(e)}")
 
-def render_sidebar_logs():
     st.divider()
     st.header("Provider Logs")
-    refresh = st.checkbox("Auto-refresh logs (10s)", help="Automatically refresh the app to see new log entries")
+    auto_refresh = st.checkbox("Auto-refresh logs (10s)", help="Automatically refresh the app to see new log entries")
+    
     if os.path.exists("provider_errors.log"):
         with open("provider_errors.log", "r", encoding="utf-8") as f:
             log_content = f.read()
@@ -245,15 +191,6 @@ def render_sidebar_logs():
             st.rerun()
     else:
         st.info("No provider logs recorded.")
-    return refresh
-
-# --- Initialize Sidebar UI ---
-with st.sidebar:
-    render_sidebar_warnings(missing_deps)
-    temperature, rag_enabled = render_sidebar_settings()
-    provider_mode, selected_p, custom_config = render_sidebar_provider()
-    render_sidebar_diagnostics(provider_mode, selected_p, custom_config)
-    auto_refresh = render_sidebar_logs()
 
 # --- AI Fallback Logic ---
 # Secondary models to try if the primary one is decommissioned or not found.
@@ -274,12 +211,12 @@ def is_model_error(error: Exception) -> bool:
     return any(keyword in msg for keyword in ["model_not_found", "decommissioned", "404", "no endpoints found"])
 
 
-def run_generation_flow(task_type: str, text: str, tone: str, length: str = None, rag_enabled: bool = True, p_mode: str = "Auto Fallback", selected_p: str = None, custom_config: dict = None):
+def run_generation_flow(task_type: str, text: str, tone: str, length: str = None, rag_enabled: bool = True):
     """
     Handles the core logic for AI generation including candidate selection,
     model fallbacks, error logging, and history management.
     """
-    candidates = get_provider_candidates(p_mode, selected_p, custom_config)
+    candidates = get_provider_candidates()
     result = None
     
     for p_name, p_kwargs in candidates:
@@ -392,13 +329,8 @@ def run_generation_flow(task_type: str, text: str, tone: str, length: str = None
     return result
 
 
-def get_provider_candidates(mode="Auto Fallback", selected_p=None, custom_config=None):
+def get_provider_candidates():
     """Determine which providers are configured in secrets/env."""
-    if mode == "Manual Selection" and selected_p == "Custom":
-        if custom_config:
-            return [("Custom", custom_config)]
-        return []
-
     candidates = []
     llm_sec = st.secrets.get("llm", {})
     
@@ -433,9 +365,6 @@ def get_provider_candidates(mode="Auto Fallback", selected_p=None, custom_config
         "model": os.getenv("OLLAMA_MODEL", "llama3")
     }))
     
-    if mode == "Manual Selection" and selected_p:
-        return [c for c in candidates if c[0] == selected_p]
-
     return candidates
 
 # --- Main Input ---
@@ -455,7 +384,7 @@ if uploaded_file is not None:
         else:
             initial_text = uploaded_file.read().decode("utf-8")
         
-        # Automatically vectorize the content if it's a new file or the vector_db is empty
+        # Automatically vectorize the content if it's a new file
         if uploaded_file.name != st.session_state.last_uploaded_file:
             st.session_state.vector_db = vectorize_text(initial_text)
             st.session_state.last_uploaded_file = uploaded_file.name
@@ -464,51 +393,18 @@ if uploaded_file is not None:
     except Exception as e:
         st.error(f"Error reading local file: {e}")
 
-# If a file was uploaded, it takes precedence for the main text area value
-if initial_text:
-    st.session_state.main_text_area_value = initial_text
-
 if st.session_state.vector_db:
     with st.expander("🔍 Semantic Search (Query Document)"):
-        query_input = st.text_input(
-            "Ask the document a question to extract context:",
-            value=st.session_state.semantic_search_query_input,
-            key="semantic_search_query_key" # Unique key for the widget
-        )
-
-        if st.button("Search Document", key="trigger_semantic_search_btn") and query_input:
-            st.session_state.semantic_search_query_input = query_input # Store the query that triggered the search
-            if st.session_state.semantic_search_thread and st.session_state.semantic_search_thread.is_alive():
-                st.warning("A search is already running. Please wait.")
-            else:
-                st.session_state.semantic_search_result = "" # Clear previous results
-                st.session_state.semantic_search_error = "" # Clear previous errors
-                st.session_state.semantic_search_thread = threading.Thread(
-                    target=_run_semantic_search_thread,
-                    args=(query_input, st.session_state.vector_db)
-                )
-                st.session_state.semantic_search_thread.start()
-                st.rerun() # Rerun to show spinner
-
-        if st.session_state.semantic_search_thread and st.session_state.semantic_search_thread.is_alive():
-            st.info("Searching document in background... Please wait.")
-        elif st.session_state.semantic_search_error:
-            st.error(f"Semantic search failed: {st.session_state.semantic_search_error}")
-        elif st.session_state.semantic_search_result:
+        query = st.text_input("Ask the document a question to extract context:")
+        if query:
+            docs = st.session_state.vector_db.similarity_search(query, k=3)
+            context = "\n\n".join([d.page_content for d in docs])
             st.markdown("**Relevant Context Found:**")
-            st.info(st.session_state.semantic_search_result)
-            if st.button("Use this context for generation"):
-                st.session_state.main_text_area_value = st.session_state.semantic_search_result
-                st.rerun() # Rerun to update the main text area
+            st.info(context)
+            if st.button("Use this context"):
+                initial_text = context
 
-user_input = st.text_area(
-    "Paste your text here (any language):",
-    value=st.session_state.main_text_area_value, # Use session state for value
-    height=200,
-    placeholder="Enter your raw text, notes, or ideas..."
-)
-# Update session state if user types directly
-st.session_state.main_text_area_value = user_input
+user_input = st.text_area("Paste your text here (any language):", value=initial_text, height=200, placeholder="Enter your raw text, notes, or ideas...")
 
 if not get_provider_candidates():
     st.error("No AI providers configured. Please add API keys to `.streamlit/secrets.toml`.")
@@ -530,21 +426,21 @@ if generate_btn:
     if not user_input.strip():
         st.warning("Please enter some text.")
     else:
-        run_generation_flow("Article", user_input, tone, length, rag_enabled=rag_enabled, p_mode=provider_mode, selected_p=selected_p, custom_config=custom_config)
+        run_generation_flow("Article", user_input, tone, length, rag_enabled=rag_enabled)
 
 # --- Generate Headlines ---
 if headlines_btn:
     if not user_input.strip():
         st.warning("Please enter some text.")
     else:
-        run_generation_flow("Headlines", user_input, tone, rag_enabled=rag_enabled, p_mode=provider_mode, selected_p=selected_p, custom_config=custom_config)
+        run_generation_flow("Headlines", user_input, tone, rag_enabled=rag_enabled)
 
 # --- Generate Poem ---
 if poem_btn:
     if not user_input.strip():
         st.warning("Please enter some text.")
     else:
-        run_generation_flow("Poem", user_input, tone, rag_enabled=rag_enabled, p_mode=provider_mode, selected_p=selected_p, custom_config=custom_config)
+        run_generation_flow("Poem", user_input, tone, rag_enabled=rag_enabled)
 
 # --- History Section ---
 if st.session_state.history:
@@ -612,10 +508,7 @@ if st.session_state.history:
                     params["user_input"], 
                     params["tone"], 
                     params.get("length"),
-                    rag_enabled=rag_enabled,
-                    p_mode=provider_mode,
-                    selected_p=selected_p,
-                    custom_config=custom_config
+                    rag_enabled=rag_enabled
                 )
                 st.rerun()
 
